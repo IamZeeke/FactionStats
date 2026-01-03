@@ -20,18 +20,19 @@ import java.util.*;
 
 public final class FactionStats extends JavaPlugin implements Listener, CommandExecutor {
 
-    // ===================== FIELDS =====================
+    // ===================== CLASS-LEVEL FIELDS =====================
     private final Map<String, Clan> clans = new HashMap<>();
     private final Map<UUID, String> playerClan = new HashMap<>();
     private File file;
     private YamlConfiguration config;
     private int tick = 0;
 
-    // ===================== ENABLE =====================
+    // ===================== ENABLE / DISABLE =====================
     @Override
     public void onEnable() {
         saveDefaultConfig();
 
+        // Create clans.yml if it doesn't exist
         file = new File(getDataFolder(), "clans.yml");
         if (!file.exists()) {
             file.getParentFile().mkdirs();
@@ -43,11 +44,11 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
         getCommand("f").setExecutor(this);
         Bukkit.getPluginManager().registerEvents(this, this);
 
-        // Scheduler for scoreboard and tags
+        // Scheduler for scoreboard + name tags
         BukkitRunnable task = new BukkitRunnable() {
             @Override
             public void run() {
-                tick++;
+                tick++; // class-level field, safe to modify
                 updateScoreboards();
                 updateTags();
             }
@@ -73,39 +74,43 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("create")) {
-            if (playerClan.containsKey(player.getUniqueId())) {
-                player.sendMessage("§cYou already have a clan.");
+        switch (args[0].toLowerCase()) {
+            case "create" -> {
+                if (playerClan.containsKey(player.getUniqueId())) {
+                    player.sendMessage("§cYou already have a clan.");
+                    return true;
+                }
+                if (args.length < 2) { player.sendMessage("§c/f create <name>"); return true; }
+
+                Clan clan = new Clan(args[1], player.getUniqueId());
+                clans.put(args[1].toLowerCase(), clan);
+                playerClan.put(player.getUniqueId(), args[1].toLowerCase());
+                saveClans();
+
+                player.sendMessage("§aClan created! You are the owner.");
                 return true;
             }
-            if (args.length < 2) { player.sendMessage("§c/f create <name>"); return true; }
 
-            Clan clan = new Clan(args[1], player.getUniqueId());
-            clans.put(args[1].toLowerCase(), clan);
-            playerClan.put(player.getUniqueId(), args[1].toLowerCase());
-            saveClans();
+            case "join" -> {
+                if (playerClan.containsKey(player.getUniqueId())) {
+                    player.sendMessage("§cYou already have a clan.");
+                    return true;
+                }
+                if (args.length < 2) { player.sendMessage("§c/f join <name>"); return true; }
 
-            player.sendMessage("§aClan created! You are the owner.");
-            return true;
-        }
+                Clan clan = clans.get(args[1].toLowerCase());
+                if (clan == null) { player.sendMessage("§cClan not found."); return true; }
 
-        if (args[0].equalsIgnoreCase("join")) {
-            if (playerClan.containsKey(player.getUniqueId())) {
-                player.sendMessage("§cYou already have a clan.");
+                // Auto-join for now
+                clan.getMembers().add(player.getUniqueId());
+                playerClan.put(player.getUniqueId(), clan.getName().toLowerCase());
+                saveClans();
+
+                player.sendMessage("§aJoined clan " + clan.getName());
                 return true;
             }
-            if (args.length < 2) { player.sendMessage("§c/f join <name>"); return true; }
 
-            Clan clan = clans.get(args[1].toLowerCase());
-            if (clan == null) { player.sendMessage("§cClan not found."); return true; }
-
-            // For now, auto-join (later you can add invite/permission system)
-            clan.getMembers().add(player.getUniqueId());
-            playerClan.put(player.getUniqueId(), clan.getName().toLowerCase());
-            saveClans();
-
-            player.sendMessage("§aJoined clan " + clan.getName());
-            return true;
+            default -> player.sendMessage("§cUnknown command.");
         }
 
         return true;
