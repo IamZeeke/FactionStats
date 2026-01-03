@@ -15,12 +15,10 @@ import java.util.*;
 
 public class FactionStats extends JavaPlugin implements Listener {
 
-    // Player kills/deaths
     private final Map<UUID, Integer> kills = new HashMap<>();
     private final Map<UUID, Integer> deaths = new HashMap<>();
 
-    // Simple faction system
-    private final Map<String, Set<UUID>> factions = new HashMap<>();  // FactionName -> PlayerUUIDs
+    private final Map<String, Set<UUID>> factions = new HashMap<>();
     private final Map<String, Integer> factionKills = new HashMap<>();
 
     @Override
@@ -34,7 +32,6 @@ public class FactionStats extends JavaPlugin implements Listener {
         getLogger().info("FactionStats disabled");
     }
 
-    // Handle kills and deaths
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player dead = event.getEntity();
@@ -44,8 +41,6 @@ public class FactionStats extends JavaPlugin implements Listener {
 
         if (killer != null) {
             kills.put(killer.getUniqueId(), kills.getOrDefault(killer.getUniqueId(), 0) + 1);
-
-            // Add to faction kills
             String faction = getFaction(killer);
             if (faction != null) {
                 factionKills.put(faction, factionKills.getOrDefault(faction, 0) + 1);
@@ -53,65 +48,79 @@ public class FactionStats extends JavaPlugin implements Listener {
         }
     }
 
-    // Join or create a faction
     private String getFaction(Player player) {
         for (Map.Entry<String, Set<UUID>> entry : factions.entrySet()) {
             if (entry.getValue().contains(player.getUniqueId())) return entry.getKey();
         }
-        return null; // No faction yet
+        return null;
     }
 
-    private void joinFaction(Player player, String factionName) {
-        factions.computeIfAbsent(factionName, k -> new HashSet<>()).add(player.getUniqueId());
-    }
-
-    // Commands
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-
         if (!(sender instanceof Player player)) {
             sender.sendMessage("Players only.");
             return true;
         }
 
         if (args.length == 0) {
-            // /fstats → show personal stats
-            int k = kills.getOrDefault(player.getUniqueId(), 0);
-            int d = deaths.getOrDefault(player.getUniqueId(), 0);
-
-            player.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "Your Stats");
-            player.sendMessage(ChatColor.GRAY + "Kills: " + ChatColor.GREEN + k);
-            player.sendMessage(ChatColor.GRAY + "Deaths: " + ChatColor.RED + d);
-            player.sendMessage(ChatColor.GRAY + "Faction: " + ChatColor.AQUA + Optional.ofNullable(getFaction(player)).orElse("None"));
+            showPlayerStats(player);
             return true;
         }
 
-        if (args.length == 1) {
+        if (args.length >= 1) {
             String sub = args[0].toLowerCase();
-            if (sub.equals("top")) {
-                showTopFactions(player);
-                return true;
+
+            switch (sub) {
+                case "top" -> showTopFactions(player);
+
+                case "create" -> {
+                    if (args.length < 2) {
+                        player.sendMessage(ChatColor.RED + "Usage: /fstats create <faction>");
+                        return true;
+                    }
+                    String factionName = args[1];
+                    if (factions.containsKey(factionName)) {
+                        player.sendMessage(ChatColor.RED + "Faction already exists!");
+                    } else {
+                        factions.put(factionName, new HashSet<>());
+                        factionKills.put(factionName, 0);
+                        player.sendMessage(ChatColor.AQUA + "Faction " + factionName + " created!");
+                    }
+                }
+
+                case "join" -> {
+                    if (args.length < 2) {
+                        player.sendMessage(ChatColor.RED + "Usage: /fstats join <faction>");
+                        return true;
+                    }
+                    String factionName = args[1];
+                    if (!factions.containsKey(factionName)) {
+                        player.sendMessage(ChatColor.RED + "Faction does not exist!");
+                    } else {
+                        factions.get(factionName).add(player.getUniqueId());
+                        player.sendMessage(ChatColor.AQUA + "You joined faction: " + factionName);
+                    }
+                }
+
+                default -> player.sendMessage(ChatColor.RED + "Unknown subcommand. Usage: /fstats, /fstats top, /fstats create <faction>, /fstats join <faction>");
             }
         }
 
-        if (args.length == 2) {
-            String sub = args[0].toLowerCase();
-            String factionName = args[1];
-            if (sub.equals("join")) {
-                joinFaction(player, factionName);
-                player.sendMessage(ChatColor.AQUA + "You joined faction: " + factionName);
-                return true;
-            }
-        }
-
-        player.sendMessage(ChatColor.RED + "Usage: /fstats, /fstats top, /fstats join <faction>");
         return true;
     }
 
-    // Top 5 factions animated scoreboard
+    private void showPlayerStats(Player player) {
+        int k = kills.getOrDefault(player.getUniqueId(), 0);
+        int d = deaths.getOrDefault(player.getUniqueId(), 0);
+
+        player.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "Your Stats");
+        player.sendMessage(ChatColor.GRAY + "Kills: " + ChatColor.GREEN + k);
+        player.sendMessage(ChatColor.GRAY + "Deaths: " + ChatColor.RED + d);
+        player.sendMessage(ChatColor.GRAY + "Faction: " + ChatColor.AQUA + Optional.ofNullable(getFaction(player)).orElse("None"));
+    }
+
     private void showTopFactions(Player player) {
         BukkitRunnable task = new BukkitRunnable() {
-
             int tick = 0;
             final String[] animation = {ChatColor.RED + "⚔", ChatColor.GOLD + "⚔", ChatColor.GREEN + "⚔", ChatColor.AQUA + "⚔"};
 
@@ -121,7 +130,6 @@ public class FactionStats extends JavaPlugin implements Listener {
                     cancel();
                     return;
                 }
-
                 tick++;
                 player.sendTitle(
                         animation[tick % animation.length] + ChatColor.BOLD + " Top Factions " + animation[(tick + 1) % animation.length],
@@ -130,7 +138,7 @@ public class FactionStats extends JavaPlugin implements Listener {
                 );
             }
         };
-        task.runTaskTimer(this, 0, 20); // updates every second
+        task.runTaskTimer(this, 0, 20);
     }
 
     private String getTopFactionsText() {
