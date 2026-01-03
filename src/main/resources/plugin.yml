@@ -5,5 +5,4 @@ api-version: 1.21
 
 commands:
   fstats:
-    description: View your faction stats
-
+    description: View your stats
