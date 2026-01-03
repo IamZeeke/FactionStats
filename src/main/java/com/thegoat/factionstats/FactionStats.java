@@ -33,11 +33,9 @@ public class FactionStats extends JavaPlugin implements Listener {
         Player dead = event.getEntity();
         Player killer = dead.getKiller();
 
-        // Add death
         deaths.put(dead.getUniqueId(),
                 deaths.getOrDefault(dead.getUniqueId(), 0) + 1);
 
-        // Add kill
         if (killer != null) {
             kills.put(killer.getUniqueId(),
                     kills.getOrDefault(killer.getUniqueId(), 0) + 1);
@@ -47,12 +45,10 @@ public class FactionStats extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
 
-        if (!(sender instanceof Player)) {
+        if (!(sender instanceof Player player)) { // Java 21 allows pattern matching
             sender.sendMessage("Players only.");
             return true;
         }
-
-        Player player = (Player) sender;
 
         int k = kills.getOrDefault(player.getUniqueId(), 0);
         int d = deaths.getOrDefault(player.getUniqueId(), 0);
