@@ -2,6 +2,7 @@ package me.factionstats;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.GameMode;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -24,152 +25,111 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 public class FactionStats extends JavaPlugin implements Listener {
 
-    private Map<UUID, String> playerFaction = new HashMap<>();
-    private Map<String, ChatColor> factionColors = new HashMap<>();
-    private Map<String, Set<UUID>> factionMembers = new HashMap<>();
-    private Map<String, Set<UUID>> factionJoinRequests = new HashMap<>();
-    private Map<UUID, Integer> kills = new HashMap<>();
-    private Map<UUID, Integer> deaths = new HashMap<>();
+    private FactionManager manager;
+    private Map<UUID,Integer> kills = new HashMap<>();
+    private Map<UUID,Integer> deaths = new HashMap<>();
+    private File factionsFile;
+    private FileConfiguration factionsConfig;
     private int animationTick = 0;
-
-    private File file;
-    private FileConfiguration config;
 
     @Override
     public void onEnable() {
-        Bukkit.getPluginManager().registerEvents(this, this);
+        manager = new FactionManager();
+        getServer().getPluginManager().registerEvents(this, this);
         saveDefaultConfig();
 
-        // Setup saving file
-        file = new File(getDataFolder(), "factions.yml");
-        if (!file.exists()) {
-            try {
-                file.createNewFile();
-            } catch (IOException ignored) {}
-        }
-        config = YamlConfiguration.loadConfiguration(file);
-        loadFactions();
+        // factions.yml
+        factionsFile = new File(getDataFolder(), "factions.yml");
+        if (!factionsFile.exists()) try { factionsFile.createNewFile(); } catch(IOException ignored){}
+        factionsConfig = YamlConfiguration.loadConfiguration(factionsFile);
+        manager.load(factionsConfig);
 
-        // Start scoreboard animation
         Bukkit.getScheduler().runTaskTimer(this, () -> {
             animationTick++;
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                updateScoreboard(p);
-            }
+            for (Player p : Bukkit.getOnlinePlayers()) updateScoreboard(p);
         }, 0L, 20L);
     }
 
     @Override
     public void onDisable() {
-        saveFactions();
+        manager.save(factionsConfig);
+        try { factionsConfig.save(factionsFile); } catch(IOException ignored){}
     }
-
-    /* =========================
-       EVENTS
-       ========================= */
 
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
-        UUID uuid = e.getPlayer().getUniqueId();
-        kills.putIfAbsent(uuid, 0);
-        deaths.putIfAbsent(uuid, 0);
-        createScoreboard(e.getPlayer());
+        Player p = e.getPlayer();
+        kills.putIfAbsent(p.getUniqueId(),0);
+        deaths.putIfAbsent(p.getUniqueId(),0);
+
+        // Auto Creative for faction owners
+        String fName = manager.getPlayerFaction(p.getUniqueId());
+        if (fName != null && manager.getFaction(fName).getOwner().equals(p.getUniqueId())) {
+            p.setGameMode(GameMode.CREATIVE);
+        }
+
+        createScoreboard(p);
     }
 
     @EventHandler
     public void onDeath(PlayerDeathEvent e) {
         Player dead = e.getEntity();
-        deaths.put(dead.getUniqueId(), deaths.getOrDefault(dead.getUniqueId(), 0) + 1);
-
+        deaths.put(dead.getUniqueId(), deaths.getOrDefault(dead.getUniqueId(),0)+1);
         Player killer = dead.getKiller();
-        if (killer != null) {
-            kills.put(killer.getUniqueId(), kills.getOrDefault(killer.getUniqueId(), 0) + 1);
-            String fac = playerFaction.get(killer.getUniqueId());
-            if (fac != null) {
-                // increment faction kills (for top factions)
-                // handled by scoreboard display
-            }
-        }
+        if (killer!=null) kills.put(killer.getUniqueId(), kills.getOrDefault(killer.getUniqueId(),0)+1);
     }
 
     @EventHandler
     public void onFriendlyFire(EntityDamageByEntityEvent e) {
         if (!(e.getEntity() instanceof Player) || !(e.getDamager() instanceof Player)) return;
-
-        Player a = (Player) e.getDamager();
-        Player b = (Player) e.getEntity();
-
-        String fa = playerFaction.get(a.getUniqueId());
-        String fb = playerFaction.get(b.getUniqueId());
-
-        if (fa != null && fa.equals(fb)) {
-            e.setCancelled(true);
-        }
+        Player a = (Player)e.getDamager();
+        Player b = (Player)e.getEntity();
+        String fa = manager.getPlayerFaction(a.getUniqueId());
+        String fb = manager.getPlayerFaction(b.getUniqueId());
+        if (fa!=null && fa.equals(fb)) e.setCancelled(true);
     }
 
-    /* =========================
-       COMMANDS
-       ========================= */
-
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-
+    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if (!(sender instanceof Player)) return true;
+        Player p = (Player)sender;
+        UUID uuid = p.getUniqueId();
 
-        Player player = (Player) sender;
-        UUID uuid = player.getUniqueId();
-
-        if (args.length == 0) {
-            player.sendMessage(ChatColor.GOLD + "===== Your Stats =====");
-            player.sendMessage(ChatColor.GREEN + "Kills: " + ChatColor.WHITE + kills.getOrDefault(uuid, 0));
-            player.sendMessage(ChatColor.RED + "Deaths: " + ChatColor.WHITE + deaths.getOrDefault(uuid, 0));
-            player.sendMessage(ChatColor.AQUA + "Faction: " + ChatColor.WHITE + (playerFaction.get(uuid) != null ? playerFaction.get(uuid) : "None"));
+        if (args.length==0) {
+            p.sendMessage(ChatColor.GOLD+"===== Stats =====");
+            p.sendMessage(ChatColor.GREEN+"Kills: "+ChatColor.WHITE+kills.getOrDefault(uuid,0));
+            p.sendMessage(ChatColor.RED+"Deaths: "+ChatColor.WHITE+deaths.getOrDefault(uuid,0));
+            p.sendMessage(ChatColor.AQUA+"Faction: "+ChatColor.WHITE+(manager.getPlayerFaction(uuid)!=null?manager.getPlayerFaction(uuid):"None"));
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("create") && args.length >= 2) {
-            if (playerFaction.containsKey(uuid)) {
-                player.sendMessage(ChatColor.RED + "You already have a faction.");
-                return true;
-            }
+        if (args[0].equalsIgnoreCase("create") && args.length>=2) {
+            if (manager.playerHasFaction(uuid)) { p.sendMessage(ChatColor.RED+"You already have a faction."); return true; }
             String name = args[1];
             ChatColor color = ChatColor.values()[new Random().nextInt(ChatColor.values().length)];
-            playerFaction.put(uuid, name);
-            factionColors.put(name, color);
-            Set<UUID> members = new HashSet<>();
-            members.add(uuid);
-            factionMembers.put(name, members);
-            factionJoinRequests.put(name, new HashSet<>());
-            player.sendMessage(ChatColor.GREEN + "Faction " + color + name + ChatColor.GREEN + " created!");
-            saveFactions();
+            manager.addFaction(new Faction(name,color,uuid));
+            p.sendMessage(ChatColor.GREEN+"Faction "+color+name+ChatColor.GREEN+" created!");
+            manager.save(factionsConfig);
+            try { factionsConfig.save(factionsFile); } catch(IOException ignored){}
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("join") && args.length >= 2) {
+        if (args[0].equalsIgnoreCase("join") && args.length>=2) {
             String name = args[1];
-            if (!factionMembers.containsKey(name)) {
-                player.sendMessage(ChatColor.RED + "Faction not found.");
-                return true;
-            }
-            if (playerFaction.containsKey(uuid)) {
-                player.sendMessage(ChatColor.RED + "You are already in a faction.");
-                return true;
-            }
-            factionJoinRequests.get(name).add(uuid);
-            player.sendMessage(ChatColor.AQUA + "Request sent to join " + factionColors.get(name) + name);
+            if (manager.getFaction(name)==null) { p.sendMessage(ChatColor.RED+"Faction not found."); return true; }
+            if (manager.playerHasFaction(uuid)) { p.sendMessage(ChatColor.RED+"You are already in a faction."); return true; }
+            manager.joinFaction(uuid,name);
+            p.sendMessage(ChatColor.AQUA+"Request sent to join "+manager.getFaction(name).getColor()+name);
             return true;
         }
 
         return true;
     }
 
-    /* =========================
-       SCOREBOARD
-       ========================= */
-
+    /* Scoreboard */
     private void createScoreboard(Player p) {
         Scoreboard board = Bukkit.getScoreboardManager().getNewScoreboard();
-        Objective obj = board.registerNewObjective("f", "dummy", ChatColor.RED + "⚔ Factions ⚔");
+        Objective obj = board.registerNewObjective("f","dummy",ChatColor.RED+"⚔ Factions ⚔");
         obj.setDisplaySlot(DisplaySlot.SIDEBAR);
         p.setScoreboard(board);
     }
@@ -177,75 +137,21 @@ public class FactionStats extends JavaPlugin implements Listener {
     private void updateScoreboard(Player p) {
         Scoreboard board = p.getScoreboard();
         Objective obj = board.getObjective("f");
-        if (obj == null) return;
-
+        if (obj==null) return;
         board.getEntries().forEach(board::resetScores);
 
         int line = 15;
-        obj.getScore(ChatColor.YELLOW + "Kills: " + kills.getOrDefault(p.getUniqueId(), 0)).setScore(line--);
-        obj.getScore(ChatColor.RED + "Deaths: " + deaths.getOrDefault(p.getUniqueId(), 0)).setScore(line--);
-        obj.getScore(ChatColor.GRAY + " ").setScore(line--);
+        obj.getScore(ChatColor.YELLOW+"Kills: "+kills.getOrDefault(p.getUniqueId(),0)).setScore(line--);
+        obj.getScore(ChatColor.RED+"Deaths: "+deaths.getOrDefault(p.getUniqueId(),0)).setScore(line--);
+        obj.getScore(ChatColor.GRAY+" ").setScore(line--);
 
-        // Top factions
-        List<Map.Entry<String, Set<UUID>>> top = new ArrayList<>(factionMembers.entrySet());
-        top.sort((a, b) -> b.getValue().size() - a.getValue().size()); // by members count
+        List<Faction> top = new ArrayList<>(manager.getAllFactions());
+        top.sort((a,b)->b.getMembers().size()-a.getMembers().size());
 
-        obj.getScore(ChatColor.GOLD + "Top Factions").setScore(line--);
-        for (int i = 0; i < Math.min(5, top.size()); i++) {
-            String fname = top.get(i).getKey();
-            ChatColor color = factionColors.getOrDefault(fname, ChatColor.WHITE);
-            obj.getScore(color + fname + " §7(" + factionMembers.get(fname).size() + ")").setScore(line--);
-        }
-    }
-
-    /* =========================
-       SAVE / LOAD
-       ========================= */
-
-    private void saveFactions() {
-        for (String key : factionMembers.keySet()) {
-            config.set(key + ".color", factionColors.get(key).name());
-            config.set(key + ".members", factionMembers.get(key).stream().map(UUID::toString).toList());
-            config.set(key + ".requests", factionJoinRequests.get(key).stream().map(UUID::toString).toList());
-        }
-        for (UUID u : playerFaction.keySet()) {
-            config.set("playerFaction." + u.toString(), playerFaction.get(u));
-        }
-
-        try {
-            config.save(file);
-        } catch (IOException e) {
-            getLogger().warning("Could not save factions.yml");
-        }
-    }
-
-    private void loadFactions() {
-        if (config.getConfigurationSection("") == null) return;
-
-        // Load playerFaction
-        if (config.getConfigurationSection("playerFaction") != null) {
-            for (String key : config.getConfigurationSection("playerFaction").getKeys(false)) {
-                playerFaction.put(UUID.fromString(key), config.getString("playerFaction." + key));
-            }
-        }
-
-        // Load factions
-        for (String key : config.getKeys(false)) {
-            if (key.equals("playerFaction")) continue;
-
-            factionColors.put(key, ChatColor.valueOf(config.getString(key + ".color")));
-            factionMembers.put(key, new HashSet<>());
-            if (config.getStringList(key + ".members") != null) {
-                for (String s : config.getStringList(key + ".members")) {
-                    factionMembers.get(key).add(UUID.fromString(s));
-                }
-            }
-            factionJoinRequests.put(key, new HashSet<>());
-            if (config.getStringList(key + ".requests") != null) {
-                for (String s : config.getStringList(key + ".requests")) {
-                    factionJoinRequests.get(key).add(UUID.fromString(s));
-                }
-            }
+        obj.getScore(ChatColor.GOLD+"Top Factions").setScore(line--);
+        for(int i=0;i<Math.min(5,top.size());i++) {
+            Faction f = top.get(i);
+            obj.getScore(f.getColor()+f.getName()+" §7("+f.getMembers().size()+")").setScore(line--);
         }
     }
 }
