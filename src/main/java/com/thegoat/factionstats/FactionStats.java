@@ -20,15 +20,18 @@ import java.util.*;
 
 public final class FactionStats extends JavaPlugin implements Listener, CommandExecutor {
 
+    // ===================== FIELDS =====================
     private final Map<String, Clan> clans = new HashMap<>();
     private final Map<UUID, String> playerClan = new HashMap<>();
     private File file;
     private YamlConfiguration config;
     private int tick = 0;
 
+    // ===================== ENABLE =====================
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
         file = new File(getDataFolder(), "clans.yml");
         if (!file.exists()) {
             file.getParentFile().mkdirs();
@@ -40,18 +43,26 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
         getCommand("f").setExecutor(this);
         Bukkit.getPluginManager().registerEvents(this, this);
 
-        new BukkitRunnable() {
+        // Scheduler for scoreboard and tags
+        BukkitRunnable task = new BukkitRunnable() {
             @Override
-            public void run() { updateScoreboards(); updateTags(); }
-        }.runTaskTimer(this, 0L, 20L);
+            public void run() {
+                tick++;
+                updateScoreboards();
+                updateTags();
+            }
+        };
+        task.runTaskTimer(this, 0L, 20L);
 
         getLogger().info("FactionStats enabled!");
     }
 
     @Override
-    public void onDisable() { saveClans(); }
+    public void onDisable() {
+        saveClans();
+    }
 
-    // ===================== CLAN COMMANDS =====================
+    // ===================== COMMANDS =====================
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if (!(sender instanceof Player player)) return true;
@@ -68,11 +79,13 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
                 return true;
             }
             if (args.length < 2) { player.sendMessage("§c/f create <name>"); return true; }
+
             Clan clan = new Clan(args[1], player.getUniqueId());
             clans.put(args[1].toLowerCase(), clan);
             playerClan.put(player.getUniqueId(), args[1].toLowerCase());
             saveClans();
-            player.sendMessage("§aClan created!");
+
+            player.sendMessage("§aClan created! You are the owner.");
             return true;
         }
 
@@ -82,11 +95,15 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
                 return true;
             }
             if (args.length < 2) { player.sendMessage("§c/f join <name>"); return true; }
+
             Clan clan = clans.get(args[1].toLowerCase());
             if (clan == null) { player.sendMessage("§cClan not found."); return true; }
+
+            // For now, auto-join (later you can add invite/permission system)
             clan.getMembers().add(player.getUniqueId());
             playerClan.put(player.getUniqueId(), clan.getName().toLowerCase());
             saveClans();
+
             player.sendMessage("§aJoined clan " + clan.getName());
             return true;
         }
@@ -100,8 +117,11 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
         Player dead = e.getEntity();
         Player killer = dead.getKiller();
 
-        if (playerClan.containsKey(dead.getUniqueId())) clans.get(playerClan.get(dead.getUniqueId())).addDeath();
-        if (killer != null && playerClan.containsKey(killer.getUniqueId())) clans.get(playerClan.get(killer.getUniqueId())).addKill();
+        if (playerClan.containsKey(dead.getUniqueId()))
+            clans.get(playerClan.get(dead.getUniqueId())).addDeath();
+
+        if (killer != null && playerClan.containsKey(killer.getUniqueId()))
+            clans.get(playerClan.get(killer.getUniqueId())).addKill();
 
         saveClans();
     }
@@ -110,6 +130,7 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
     public void onDamage(EntityDamageByEntityEvent e) {
         if (!(e.getEntity() instanceof Player target)) return;
         if (!(e.getDamager() instanceof Player attacker)) return;
+
         if (playerClan.containsKey(attacker.getUniqueId()) &&
             playerClan.containsKey(target.getUniqueId()) &&
             playerClan.get(attacker.getUniqueId()).equals(playerClan.get(target.getUniqueId()))) {
@@ -119,7 +140,6 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
 
     // ===================== SCOREBOARD =====================
     private void updateScoreboards() {
-        tick++;
         for (Player p : Bukkit.getOnlinePlayers()) {
             Scoreboard sb = Bukkit.getScoreboardManager().getNewScoreboard();
             Objective o = sb.registerNewObjective("f", "dummy", "§c⚔ §6Factions §c⚔");
@@ -171,7 +191,9 @@ public final class FactionStats extends JavaPlugin implements Listener, CommandE
             Clan c = new Clan(name, owner);
             c.kills = config.getInt("clans." + name + ".kills");
             c.deaths = config.getInt("clans." + name + ".deaths");
-            for (String s : config.getStringList("clans." + name + ".members")) c.getMembers().add(UUID.fromString(s));
+            for (String s : config.getStringList("clans." + name + ".members"))
+                c.getMembers().add(UUID.fromString(s));
+
             clans.put(name.toLowerCase(), c);
             for (UUID u : c.getMembers()) playerClan.put(u, name.toLowerCase());
         }
