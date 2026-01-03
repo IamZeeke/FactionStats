@@ -1,85 +1,61 @@
-package com.thegoat.factionstats;
+package me.yourname.factionstats;
 
-import com.massivecraft.factions.FPlayer;
-import com.massivecraft.factions.FPlayers;
-import com.massivecraft.factions.Faction;
 import org.bukkit.Bukkit;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scoreboard.*;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.HashMap;
+import java.util.UUID;
 
-public class FactionStats extends JavaPlugin {
+public class FactionStats extends JavaPlugin implements Listener {
 
-    private final Map<UUID, Integer> animationIndex = new HashMap<>();
-    private final List<String> animationFrames = Arrays.asList(
-            "§c✦", "§6✦", "§e✦", "§a✦", "§b✦", "§d✦"
-    );
+    private final HashMap<UUID, Integer> kills = new HashMap<>();
+    private final HashMap<UUID, Integer> deaths = new HashMap<>();
 
     @Override
     public void onEnable() {
-        getLogger().info("[FactionStats] Plugin enabled!");
-
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    updateScoreboard(player);
-                }
-            }
-        }.runTaskTimer(this, 0L, 20L);
+        Bukkit.getPluginManager().registerEvents(this, this);
+        getLogger().info("FactionStats enabled");
     }
 
     @Override
     public void onDisable() {
-        getLogger().info("[FactionStats] Plugin disabled!");
+        getLogger().info("FactionStats disabled");
     }
 
-    private void updateScoreboard(Player player) {
-        FPlayer fPlayer = FPlayers.getInstance().getByPlayer(player);
-        Faction faction = fPlayer.getFaction();
+    @EventHandler
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        Player dead = event.getEntity();
+        Player killer = dead.getKiller();
 
-        ScoreboardManager manager = Bukkit.getScoreboardManager();
-        Scoreboard board = manager.getNewScoreboard();
+        deaths.put(dead.getUniqueId(),
+                deaths.getOrDefault(dead.getUniqueId(), 0) + 1);
 
-        animationIndex.putIfAbsent(player.getUniqueId(), 0);
-        int idx = animationIndex.get(player.getUniqueId());
-        String frame = animationFrames.get(idx % animationFrames.size());
-        animationIndex.put(player.getUniqueId(), idx + 1);
+        if (killer != null) {
+            kills.put(killer.getUniqueId(),
+                    kills.getOrDefault(killer.getUniqueId(), 0) + 1);
+        }
+    }
 
-        Objective objective = board.registerNewObjective(
-                "fstats", "dummy",
-                frame + " §c⚔ §6Faction Stats §c⚔ " + frame
-        );
-        objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-
-        if (faction.isNone()) {
-            objective.getScore("§cYou are not in a faction!").setScore(6);
-        } else {
-            objective.getScore("§eFaction: §f" + faction.getName()).setScore(6);
-            objective.getScore("§eMembers: §f" + faction.getFPlayers().size()).setScore(5);
-            objective.getScore("§ePower: §f" + faction.getPower() + "/" + faction.getMaxPower()).setScore(4);
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage("Players only.");
+            return true;
         }
 
-        List<Faction> topFactions = FPlayers.getInstance().getFPlayers()
-                .stream()
-                .map(FPlayer::getFaction)
-                .distinct()
-                .sorted(Comparator.comparingDouble(Faction::getPower).reversed())
-                .limit(5)
-                .collect(Collectors.toList());
+        int k = kills.getOrDefault(player.getUniqueId(), 0);
+        int d = deaths.getOrDefault(player.getUniqueId(), 0);
 
-        int scoreIndex = 3;
-        objective.getScore("§6Top 5 Factions:").setScore(scoreIndex--);
+        player.sendMessage("§6§lYour Stats");
+        player.sendMessage("§7Kills: §a" + k);
+        player.sendMessage("§7Deaths: §c" + d);
 
-        for (Faction top : topFactions) {
-            objective.getScore("§e" + top.getName() + ": §f" + top.getPower()).setScore(scoreIndex--);
-        }
-
-        player.setScoreboard(board);
+        return true;
     }
 }
-
