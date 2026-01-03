@@ -1,8 +1,9 @@
 name: FactionStats
-version: 1.0.0
+version: 2.0.0
 main: me.yourname.factionstats.FactionStats
 api-version: 1.21
 
 commands:
   fstats:
-    description: View your stats
+    description: Show your stats or top factions
+    usage: /fstats [top|join <faction>]
