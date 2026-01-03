@@ -1,7 +1,4 @@
-package me.yourname.factionstats;
-
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -9,147 +6,182 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.configuration.file.YamlConfiguration;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
 
 public class FactionStats extends JavaPlugin implements Listener {
 
-    private final Map<UUID, Integer> kills = new HashMap<>();
-    private final Map<UUID, Integer> deaths = new HashMap<>();
-
-    private final Map<String, Set<UUID>> factions = new HashMap<>();
-    private final Map<String, Integer> factionKills = new HashMap<>();
+    private final Map<String, Clan> clans = new HashMap<>();
+    private final Map<UUID, String> playerClan = new HashMap<>();
+    private File dataFile;
+    private YamlConfiguration data;
 
     @Override
     public void onEnable() {
         Bukkit.getPluginManager().registerEvents(this, this);
+
+        dataFile = new File(getDataFolder(), "data.yml");
+        if (!dataFile.exists()) {
+            dataFile.getParentFile().mkdirs();
+            try {
+                dataFile.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        data = YamlConfiguration.loadConfiguration(dataFile);
+        loadData();
         getLogger().info("FactionStats enabled");
     }
 
     @Override
     public void onDisable() {
-        getLogger().info("FactionStats disabled");
+        saveData();
     }
 
-    @EventHandler
-    public void onPlayerDeath(PlayerDeathEvent event) {
-        Player dead = event.getEntity();
-        Player killer = dead.getKiller();
-
-        deaths.put(dead.getUniqueId(), deaths.getOrDefault(dead.getUniqueId(), 0) + 1);
-
-        if (killer != null) {
-            kills.put(killer.getUniqueId(), kills.getOrDefault(killer.getUniqueId(), 0) + 1);
-            String faction = getFaction(killer);
-            if (faction != null) {
-                factionKills.put(faction, factionKills.getOrDefault(faction, 0) + 1);
-            }
-        }
-    }
-
-    private String getFaction(Player player) {
-        for (Map.Entry<String, Set<UUID>> entry : factions.entrySet()) {
-            if (entry.getValue().contains(player.getUniqueId())) return entry.getKey();
-        }
-        return null;
-    }
-
+    // COMMANDS
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) {
-            sender.sendMessage("Players only.");
+    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+
+        if (!(sender instanceof Player player)) return true;
+
+        if (args.length < 1) {
+            player.sendMessage("§c/f create <name>");
+            player.sendMessage("§c/f join <name>");
             return true;
         }
 
-        if (args.length == 0) {
-            showPlayerStats(player);
-            return true;
-        }
-
-        if (args.length >= 1) {
-            String sub = args[0].toLowerCase();
-
-            switch (sub) {
-                case "top" -> showTopFactions(player);
-
-                case "create" -> {
-                    if (args.length < 2) {
-                        player.sendMessage(ChatColor.RED + "Usage: /fstats create <faction>");
-                        return true;
-                    }
-                    String factionName = args[1];
-                    if (factions.containsKey(factionName)) {
-                        player.sendMessage(ChatColor.RED + "Faction already exists!");
-                    } else {
-                        factions.put(factionName, new HashSet<>());
-                        factionKills.put(factionName, 0);
-                        player.sendMessage(ChatColor.AQUA + "Faction " + factionName + " created!");
-                    }
-                }
-
-                case "join" -> {
-                    if (args.length < 2) {
-                        player.sendMessage(ChatColor.RED + "Usage: /fstats join <faction>");
-                        return true;
-                    }
-                    String factionName = args[1];
-                    if (!factions.containsKey(factionName)) {
-                        player.sendMessage(ChatColor.RED + "Faction does not exist!");
-                    } else {
-                        factions.get(factionName).add(player.getUniqueId());
-                        player.sendMessage(ChatColor.AQUA + "You joined faction: " + factionName);
-                    }
-                }
-
-                default -> player.sendMessage(ChatColor.RED + "Unknown subcommand. Usage: /fstats, /fstats top, /fstats create <faction>, /fstats join <faction>");
+        if (args[0].equalsIgnoreCase("create")) {
+            if (playerClan.containsKey(player.getUniqueId())) {
+                player.sendMessage("§cYou are already in a clan.");
+                return true;
             }
+
+            if (args.length < 2) {
+                player.sendMessage("§cUsage: /f create <name>");
+                return true;
+            }
+
+            String name = args[1].toLowerCase();
+            if (clans.containsKey(name)) {
+                player.sendMessage("§cThat clan already exists.");
+                return true;
+            }
+
+            Clan clan = new Clan(name, player.getUniqueId());
+            clans.put(name, clan);
+            playerClan.put(player.getUniqueId(), name);
+
+            player.sendMessage("§aClan created successfully!");
+            saveData();
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("join")) {
+            if (playerClan.containsKey(player.getUniqueId())) {
+                player.sendMessage("§cYou are already in a clan.");
+                return true;
+            }
+
+            if (args.length < 2) {
+                player.sendMessage("§cUsage: /f join <name>");
+                return true;
+            }
+
+            String name = args[1].toLowerCase();
+            Clan clan = clans.get(name);
+
+            if (clan == null) {
+                player.sendMessage("§cClan not found.");
+                return true;
+            }
+
+            clan.members.add(player.getUniqueId());
+            playerClan.put(player.getUniqueId(), name);
+
+            player.sendMessage("§aYou joined clan " + clan.name);
+            saveData();
+            return true;
         }
 
         return true;
     }
 
-    private void showPlayerStats(Player player) {
-        int k = kills.getOrDefault(player.getUniqueId(), 0);
-        int d = deaths.getOrDefault(player.getUniqueId(), 0);
+    // KILLS / DEATHS
+    @EventHandler
+    public void onDeath(PlayerDeathEvent event) {
+        Player dead = event.getEntity();
+        Player killer = dead.getKiller();
 
-        player.sendMessage(ChatColor.GOLD + "" + ChatColor.BOLD + "Your Stats");
-        player.sendMessage(ChatColor.GRAY + "Kills: " + ChatColor.GREEN + k);
-        player.sendMessage(ChatColor.GRAY + "Deaths: " + ChatColor.RED + d);
-        player.sendMessage(ChatColor.GRAY + "Faction: " + ChatColor.AQUA + Optional.ofNullable(getFaction(player)).orElse("None"));
+        if (playerClan.containsKey(dead.getUniqueId())) {
+            clans.get(playerClan.get(dead.getUniqueId())).deaths++;
+        }
+
+        if (killer != null && playerClan.containsKey(killer.getUniqueId())) {
+            clans.get(playerClan.get(killer.getUniqueId())).kills++;
+        }
+
+        saveData();
     }
 
-    private void showTopFactions(Player player) {
-        BukkitRunnable task = new BukkitRunnable() {
-            int tick = 0;
-            final String[] animation = {ChatColor.RED + "⚔", ChatColor.GOLD + "⚔", ChatColor.GREEN + "⚔", ChatColor.AQUA + "⚔"};
+    // DATA SAVE / LOAD
+    private void saveData() {
+        data.set("clans", null);
 
-            @Override
-            public void run() {
-                if (!player.isOnline()) {
-                    cancel();
-                    return;
-                }
-                tick++;
-                player.sendTitle(
-                        animation[tick % animation.length] + ChatColor.BOLD + " Top Factions " + animation[(tick + 1) % animation.length],
-                        getTopFactionsText(),
-                        5, 20, 5
-                );
+        for (Clan clan : clans.values()) {
+            String path = "clans." + clan.name;
+            data.set(path + ".owner", clan.owner.toString());
+            data.set(path + ".kills", clan.kills);
+            data.set(path + ".deaths", clan.deaths);
+
+            List<String> members = new ArrayList<>();
+            for (UUID u : clan.members) members.add(u.toString());
+            data.set(path + ".members", members);
+        }
+
+        try {
+            data.save(dataFile);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void loadData() {
+        if (!data.contains("clans")) return;
+
+        for (String name : data.getConfigurationSection("clans").getKeys(false)) {
+            UUID owner = UUID.fromString(data.getString("clans." + name + ".owner"));
+            Clan clan = new Clan(name, owner);
+
+            clan.kills = data.getInt("clans." + name + ".kills");
+            clan.deaths = data.getInt("clans." + name + ".deaths");
+
+            for (String s : data.getStringList("clans." + name + ".members")) {
+                UUID u = UUID.fromString(s);
+                clan.members.add(u);
+                playerClan.put(u, name);
             }
-        };
-        task.runTaskTimer(this, 0, 20);
+
+            clans.put(name, clan);
+        }
     }
 
-    private String getTopFactionsText() {
-        StringBuilder sb = new StringBuilder();
-        factionKills.entrySet().stream()
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .limit(5)
-                .forEach(entry -> sb.append(ChatColor.YELLOW).append(entry.getKey())
-                        .append(ChatColor.GRAY).append(" - Kills: ")
-                        .append(ChatColor.GREEN).append(entry.getValue())
-                        .append("\n"));
-        return sb.toString();
+    // CLAN CLASS (INNER — SAME FILE)
+    private static class Clan {
+        String name;
+        UUID owner;
+        Set<UUID> members = new HashSet<>();
+        int kills = 0;
+        int deaths = 0;
+
+        Clan(String name, UUID owner) {
+            this.name = name;
+            this.owner = owner;
+            members.add(owner);
+        }
     }
 }
