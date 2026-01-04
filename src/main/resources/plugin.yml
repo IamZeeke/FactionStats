@@ -1,10 +1,8 @@
 name: FactionStats
-version: 2.0
+version: 1.0
 main: me.factionstats.FactionStats
 api-version: 1.21
 commands:
   f:
     description: Main faction command
-    usage: /f <create|join|leave|stats|accept|top|friendlyfire>
-    aliases: [factionstats, factions]
-
+    usage: /<command> <create|join|accept|deny|disband|role>
